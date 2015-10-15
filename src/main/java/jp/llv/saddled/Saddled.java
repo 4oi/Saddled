@@ -105,14 +105,17 @@ public class Saddled extends JavaPlugin implements Listener {
         if (riden instanceof Player) {
             Item c1 = cushion.apply(riden.getLocation()),
                     c2 = cushion.apply(riden.getLocation()),
-                    c3 = cushion.apply(riden.getLocation());
+                    c3 = cushion.apply(riden.getLocation()),
+                    c4 = cushion.apply(riden.getLocation());
             watching.add(c1);
             watching.add(c2);
             watching.add(c3);
+            watching.add(c4);
             riden.setPassenger(c1);
             c1.setPassenger(c2);
             c2.setPassenger(c3);
-            c3.setPassenger(rider);
+            c3.setPassenger(c4);
+            c4.setPassenger(rider);
         } else {
             riden.setPassenger(rider);
         }
@@ -144,39 +147,79 @@ public class Saddled extends JavaPlugin implements Listener {
         if (e.getPlayer().getPassenger() == null) {
             return;
         }
-        if (!e.getPlayer().hasPermission("saddled.drop")) {
+        if (!e.getPlayer().hasPermission(
+                "saddled.drop." + e.getPlayer().getPassenger().getType().toString().toLowerCase()
+        )) {
             return;
         }
         e.setCancelled(true);
         e.getPlayer().eject();
         PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, e.getPlayer(), "降ろしました");
     }
-    
+
     @EventHandler
     public void on(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof Player)) {
             return;
         }
         Player p = (Player) e.getDamager();
-        if (p.getItemInHand().getType() != Material.BONE) {
+        ItemStack is = p.getItemInHand();
+        if (is.getType() != Material.BONE) {
             return;
         }
-        if (!p.hasPermission("saddled.break")) {
-            return;
+
+        if (p.isSneaking()) {
+            if (!p.hasPermission("saddled.reverse")) {
+                return;
+            }
+            List<Entity> totem = new ArrayList<>();
+            totem.addAll(getRiders(e.getEntity()));
+            Collections.reverse(totem);
+            totem.add(e.getEntity());
+            totem.addAll(getVehicles(e.getEntity()));
+            if (totem.stream().map(Entity::getType).anyMatch(t -> t == EntityType.PLAYER)) {
+                return;
+            }
+            if (totem.size() <= 1) {
+                return;
+            }
+            e.setCancelled(true);
+            totem.forEach(Entity::eject);
+            for (int i = 0; i < totem.size() - 1; i++) {
+                totem.get(i).setPassenger(totem.get(i+1));
+            }
+            PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, p, "反転しました");
+        } else {
+            if (!p.hasPermission("saddled.break")) {
+                return;
+            }
+            List<Entity> totem = new ArrayList<>();
+            totem.add(e.getEntity());
+            totem.addAll(getVehicles(e.getEntity()));
+            totem.addAll(getRiders(e.getEntity()));
+            if (totem.stream().map(Entity::getType).anyMatch(t -> t == EntityType.PLAYER)) {
+                return;
+            }
+            if (totem.size() <= 1) {
+                return;
+            }
+            e.setCancelled(true);
+            totem.forEach(Entity::eject);
+            PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, p, "分離しました");
         }
-        List<Entity> totem = new ArrayList<>();
-        totem.add(e.getEntity());
-        totem.addAll(getVehicles(e.getEntity()));
-        totem.addAll(getRiders(e.getEntity()));
-        if (totem.stream().map(Entity::getType).anyMatch(t -> t==EntityType.PLAYER)) {
-            return;
+
+        GameMode gm = p.getGameMode();
+        switch (gm) {
+            case CREATIVE:
+                return;
+            case SPECTATOR:
+                return;
         }
-        if (totem.size() <= 1) {
-            return;
+        if (is.getAmount() <= 1) {
+            p.setItemInHand(null);
+        } else {
+            is.setAmount(is.getAmount() - 1);
         }
-        e.setCancelled(true);
-        totem.forEach(Entity::eject);
-        PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, p, "分離しました");
     }
 
     public void removeUnnecessaryCushion() {
@@ -194,10 +237,10 @@ public class Saddled extends JavaPlugin implements Listener {
                 if (riders.isEmpty() || vehicles.isEmpty()) {
                     removeEntity(i);
                     it.remove();
-                } else if (riders.get(riders.size() - 1).getType() == EntityType.DROPPED_ITEM) {
+                } else if (riders.stream().map(Entity::getType).allMatch(EntityType.DROPPED_ITEM::equals)) {
                     removeEntity(i);
                     it.remove();
-                } else if (vehicles.get(vehicles.size() - 1).getType() != EntityType.PLAYER) {
+                } else if (vehicles.stream().map(Entity::getType).allMatch(EntityType.DROPPED_ITEM::equals)) {
                     removeEntity(i);
                     it.remove();
                 }
