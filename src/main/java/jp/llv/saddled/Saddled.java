@@ -48,9 +48,9 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public class Saddled extends JavaPlugin implements Listener {
 
-    private static final int CUSHION_AMOUNT = 6;
+    private int cushionAmount = 6;
     private final Set<Item> watching = new HashSet<>();
-    private static final Function<Location, Item> cushion = (l) -> {
+    private static final Function<Location, Item> cushionSupplier = (l) -> {
         Item item = l.getWorld().dropItem(l, new ItemStack(Material.STONE_BUTTON));
         item.setPickupDelay(32767);
         Refl.wrap(item).invoke("getHandle").set("ticksLived", -32768);
@@ -61,6 +61,8 @@ public class Saddled extends JavaPlugin implements Listener {
     public void onEnable() {
         this.getServer().getPluginManager().registerEvents(this, this);
         this.getServer().getScheduler().runTaskTimer(this, this::removeUnnecessaryCushion, 20L, 10L);
+        this.saveDefaultConfig();
+        this.cushionAmount = this.getConfig().getInt("cushions", 6);
     }
 
     @Override
@@ -105,8 +107,8 @@ public class Saddled extends JavaPlugin implements Listener {
         riden = ridersOfRiden.isEmpty() ? riden : ridersOfRiden.get(ridersOfRiden.size() - 1);//実際には乗れる人にターゲットをスイッチ
         if (riden instanceof Player) {
             Entity e = riden;
-            for (int i = 0; i < CUSHION_AMOUNT; i++) {
-                Item c = cushion.apply(riden.getLocation());
+            for (int i = 0; i < cushionAmount; i++) {
+                Item c = cushionSupplier.apply(riden.getLocation());
                 watching.add(c);
                 e.setPassenger(c);
             }
