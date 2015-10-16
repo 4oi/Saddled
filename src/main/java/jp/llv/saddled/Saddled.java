@@ -48,6 +48,7 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public class Saddled extends JavaPlugin implements Listener {
 
+    private static final int CUSHION_AMOUNT = 6;
     private final Set<Item> watching = new HashSet<>();
     private static final Function<Location, Item> cushion = (l) -> {
         Item item = l.getWorld().dropItem(l, new ItemStack(Material.STONE_BUTTON));
@@ -103,19 +104,13 @@ public class Saddled extends JavaPlugin implements Listener {
 
         riden = ridersOfRiden.isEmpty() ? riden : ridersOfRiden.get(ridersOfRiden.size() - 1);//実際には乗れる人にターゲットをスイッチ
         if (riden instanceof Player) {
-            Item c1 = cushion.apply(riden.getLocation()),
-                    c2 = cushion.apply(riden.getLocation()),
-                    c3 = cushion.apply(riden.getLocation()),
-                    c4 = cushion.apply(riden.getLocation());
-            watching.add(c1);
-            watching.add(c2);
-            watching.add(c3);
-            watching.add(c4);
-            riden.setPassenger(c1);
-            c1.setPassenger(c2);
-            c2.setPassenger(c3);
-            c3.setPassenger(c4);
-            c4.setPassenger(rider);
+            Entity e = riden;
+            for (int i = 0; i < CUSHION_AMOUNT; i++) {
+                Item c = cushion.apply(riden.getLocation());
+                watching.add(c);
+                e.setPassenger(c);
+            }
+            e.setPassenger(rider);
         } else {
             riden.setPassenger(rider);
         }
