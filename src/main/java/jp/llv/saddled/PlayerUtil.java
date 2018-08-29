@@ -16,7 +16,6 @@
  */
 package jp.llv.saddled;
 
-import jp.llv.reflective.Refl;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.TextComponent;
@@ -27,19 +26,6 @@ import org.bukkit.entity.Player;
  * @author Toyblocks
  */
 public class PlayerUtil {
-    
-    private static byte toChatTypeCode(ChatMessageType type) {
-        switch (type) {
-            case CHAT:
-                return (byte) 0;
-            case SYSTEM:
-                return (byte) 1;
-            case ACTION_BAR:
-                return (byte) 2;
-            default:
-                return (byte) 0;
-        }
-    }
     
     public static void sendMessage(ChatMessageType type, Player player, String message) {
         sendMessageIgnoreType(type, player, new TextComponent(message));
@@ -54,15 +40,7 @@ public class PlayerUtil {
     }
     
     private static void sendMessageIgnoreType(ChatMessageType type, Player player, BaseComponent... message) {
-        String packname = player.getClass().getPackage().getName();
-        String[] hier = packname.split("\\.");
-        String nmsv = hier[hier.length - 2];
-        Refl.wrap(player).invoke("getHandle").get("playerConnection").invoke("sendPacket",
-                (Object) Refl.getRClass("net.minecraft.server." + nmsv + ".PacketPlayOutChat")
-                .newInstance()
-                .set("components", message)
-                .set("b", toChatTypeCode(type))
-        );
+        player.spigot().sendMessage(type, message);
     }
     
 }

@@ -22,25 +22,26 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Function;
-import jp.llv.reflective.Refl;
 import net.md_5.bungee.api.ChatMessageType;
 import org.bukkit.Chunk;
 import org.bukkit.GameMode;
-import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.util.Vector;
 
 /**
  *
@@ -48,21 +49,14 @@ import org.bukkit.plugin.java.JavaPlugin;
  */
 public class Saddled extends JavaPlugin implements Listener {
 
-    private int cushionAmount = 6;
+    private static final Material CUSHION_MATERIAL = Material.STONE_BUTTON;
+
     private final Set<Item> watching = new HashSet<>();
-    private static final Function<Location, Item> cushionSupplier = (l) -> {
-        Item item = l.getWorld().dropItem(l, new ItemStack(Material.STONE_BUTTON));
-        item.setPickupDelay(32767);
-        Refl.wrap(item).invoke("getHandle").set("ticksLived", -32768);
-        return item;
-    };
 
     @Override
     public void onEnable() {
         this.getServer().getPluginManager().registerEvents(this, this);
         this.getServer().getScheduler().runTaskTimer(this, this::removeUnnecessaryCushion, 20L, 10L);
-        this.saveDefaultConfig();
-        this.cushionAmount = this.getConfig().getInt("cushions", 6);
     }
 
     @Override
@@ -70,13 +64,22 @@ public class Saddled extends JavaPlugin implements Listener {
         watching.forEach(Saddled::removeEntity);
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void on(PlayerInteractAtEntityEvent eve) {
-        ItemStack is = eve.getPlayer().getItemInHand();
+        ItemStack is;
+        switch (eve.getHand()) {
+            case HAND:
+                is = eve.getPlayer().getInventory().getItemInMainHand();
+                break;
+            case OFF_HAND:
+                is = eve.getPlayer().getInventory().getItemInOffHand();
+                break;
+            default:
+                return;
+        }
         if (is.getType() != Material.BONE) {
             return;
         }
-
         eve.setCancelled(true);
 
         Entity rider;//乗る側
@@ -107,19 +110,19 @@ public class Saddled extends JavaPlugin implements Listener {
         riden = ridersOfRiden.isEmpty() ? riden : ridersOfRiden.get(ridersOfRiden.size() - 1);//実際には乗れる人にターゲットをスイッチ
         if (riden instanceof Player) {
             Entity e = riden;
-            for (int i = 0; i < cushionAmount; i++) {
-                Item c = cushionSupplier.apply(riden.getLocation());
-                watching.add(c);
-                e.setPassenger(c);
-            }
-            e.setPassenger(rider);
+            Item c = e.getWorld().dropItem(e.getLocation(), new ItemStack(CUSHION_MATERIAL));
+            c.setPickupDelay(32767);
+            c.setTicksLived(Integer.MAX_VALUE);
+            watching.add(c);
+            e.addPassenger(c);
+            c.addPassenger(rider);
         } else {
-            riden.setPassenger(rider);
+            riden.addPassenger(rider);
         }
 
         getVehicles(rider).stream().filter(e -> e instanceof Player)
                 .forEach(p -> PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, (Player) p,
-                                rider.getName() + "に乗られました"));
+                rider.getName() + "に乗られました"));
         if (rider instanceof Player) {
             PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, (Player) rider,
                     riden.getName() + "に乗りました");
@@ -128,20 +131,19 @@ public class Saddled extends JavaPlugin implements Listener {
         GameMode gm = eve.getPlayer().getGameMode();
         switch (gm) {
             case CREATIVE:
-                return;
             case SPECTATOR:
                 return;
         }
         if (is.getAmount() <= 1) {
-            eve.getPlayer().setItemInHand(null);
+            eve.getPlayer().getInventory().remove(is);
         } else {
             is.setAmount(is.getAmount() - 1);
         }
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void on(PlayerDropItemEvent e) {
-        if (e.getPlayer().getPassenger() == null) {
+        if (e.getPlayer().getPassengers().isEmpty()) {
             return;
         }
         if (!e.getPlayer().hasPermission(
@@ -151,16 +153,28 @@ public class Saddled extends JavaPlugin implements Listener {
         }
         e.setCancelled(true);
         e.getPlayer().eject();
+        e.getPlayer().getPassengers().forEach(entity -> entity.setFallDistance(0));
         PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, e.getPlayer(), "降ろしました");
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void on(EntityDamageByEntityEvent e) {
         if (!(e.getDamager() instanceof Player)) {
             return;
         }
         Player p = (Player) e.getDamager();
-        ItemStack is = p.getItemInHand();
+        if (getRiders(e.getDamager()).contains(e.getEntity())) {
+            e.setCancelled(true);
+            if (p.hasPermission("saddled.pitch")) {
+                Entity ent = e.getEntity();
+                ent.getVehicle().eject();
+                ent.setVelocity(p.getEyeLocation().getDirection().add(new Vector(0.0, 0.6, 0.0).normalize()));
+                ent.getWorld().spawnParticle(Particle.EXPLOSION_LARGE, ent.getLocation(), 1, 0.0, 0.0, 0.0, 0.0);
+                ent.getWorld().playSound(ent.getLocation(), Sound.ENTITY_ENDERDRAGON_FLAP, 2.0f, 2.0f);
+            }
+            return;
+        }
+        ItemStack is = p.getInventory().getItemInMainHand();
         if (is.getType() != Material.BONE) {
             return;
         }
@@ -183,7 +197,7 @@ public class Saddled extends JavaPlugin implements Listener {
             e.setCancelled(true);
             totem.forEach(Entity::eject);
             for (int i = 0; i < totem.size() - 1; i++) {
-                totem.get(i).setPassenger(totem.get(i+1));
+                totem.get(i).addPassenger(totem.get(i + 1));
             }
             PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, p, "反転しました");
         } else {
@@ -201,7 +215,10 @@ public class Saddled extends JavaPlugin implements Listener {
                 return;
             }
             e.setCancelled(true);
-            totem.forEach(Entity::eject);
+            totem.forEach(entity -> {
+                entity.eject();
+                entity.setFallDistance(0);
+            });
             PlayerUtil.sendMessage(ChatMessageType.ACTION_BAR, p, "分離しました");
         }
 
@@ -213,7 +230,7 @@ public class Saddled extends JavaPlugin implements Listener {
                 return;
         }
         if (is.getAmount() <= 1) {
-            p.setItemInHand(null);
+            p.getInventory().setItemInMainHand(null);
         } else {
             is.setAmount(is.getAmount() - 1);
         }
@@ -262,12 +279,11 @@ public class Saddled extends JavaPlugin implements Listener {
         }
     }
 
-    public static List<Entity> getRiders(Entity e) {
+    public static List<Entity> getRiders(Entity entity) {
         List<Entity> result = new ArrayList<>();
-        Entity c = e;
-        while (c.getPassenger() != null) {
-            c = c.getPassenger();
-            result.add(c);
+        for (Entity e : entity.getPassengers()) {
+            result.add(e);
+            result.addAll(getRiders(e));
         }
         return Collections.unmodifiableList(result);
     }
@@ -289,7 +305,7 @@ public class Saddled extends JavaPlugin implements Listener {
             as.setVisible(false);
             as.setCustomNameVisible(false);
         } else {
-            vehicle.setPassenger(passenger);
+            vehicle.addPassenger(passenger);
         }
     }
 
